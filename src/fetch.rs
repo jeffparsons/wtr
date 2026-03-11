@@ -18,10 +18,17 @@ pub struct Crate {
     pub paths: HashMap<rustdoc_types::Id, rustdoc_types::ItemSummary>,
 }
 
+pub enum VersionSource {
+    Latest,
+    Explicit,
+    Workspace,
+}
+
 /// Resolved crate data: the parsed rustdoc JSON plus the resolved version string.
 pub struct FetchedCrate {
     pub krate: Crate,
     pub version: String,
+    pub version_source: VersionSource,
 }
 
 fn cache_dir() -> Result<PathBuf> {
@@ -82,7 +89,12 @@ fn save_to_cache(crate_name: &str, version: &str, json_bytes: &[u8]) -> Result<(
 }
 
 /// Fetch rustdoc JSON for a crate from docs.rs, with disk caching.
-pub async fn fetch_crate(crate_name: &str, version: &str, refresh: bool) -> Result<FetchedCrate> {
+pub async fn fetch_crate(
+    crate_name: &str,
+    version: &str,
+    refresh: bool,
+    version_source: VersionSource,
+) -> Result<FetchedCrate> {
     let is_latest = version == "latest";
 
     // For "latest", try to resolve from sidecar cache first.
@@ -94,6 +106,7 @@ pub async fn fetch_crate(crate_name: &str, version: &str, refresh: bool) -> Resu
         return Ok(FetchedCrate {
             krate,
             version: resolved,
+            version_source,
         });
     }
 
@@ -105,6 +118,7 @@ pub async fn fetch_crate(crate_name: &str, version: &str, refresh: bool) -> Resu
         return Ok(FetchedCrate {
             krate,
             version: version.to_string(),
+            version_source,
         });
     }
 
@@ -166,6 +180,7 @@ pub async fn fetch_crate(crate_name: &str, version: &str, refresh: bool) -> Resu
     Ok(FetchedCrate {
         krate,
         version: resolved_version,
+        version_source,
     })
 }
 
@@ -203,4 +218,39 @@ fn read_format_version(json_bytes: &[u8]) -> Result<u32> {
     let partial: Partial = serde_json::from_slice(json_bytes)
         .context("failed to read format_version from rustdoc JSON")?;
     Ok(partial.format_version)
+}
+
+/// Best-effort check of the latest stable version on crates.io.
+/// Returns `None` on any error.
+pub async fn check_latest_version(crate_name: &str) -> Option<String> {
+    // Check sidecar cache first.
+    if let Ok(Some(v)) = read_latest_sidecar(crate_name) {
+        return Some(v);
+    }
+
+    let url = format!("https://crates.io/api/v1/crates/{crate_name}");
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "wtr (https://github.com/nickel-org/wtr)")
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    let text = resp.text().await.ok()?;
+    let body: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let version = body
+        .get("crate")?
+        .get("max_stable_version")?
+        .as_str()?
+        .to_string();
+
+    // Cache for future use.
+    let _ = write_latest_sidecar(crate_name, &version);
+
+    Some(version)
 }

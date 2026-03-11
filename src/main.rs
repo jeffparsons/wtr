@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use clap::Parser;
-use wtr::{fetch, lookup, render};
+use wtr::fetch::VersionSource;
+use wtr::{fetch, lookup, render, workspace};
 
 #[derive(Parser)]
 #[command(name = "wtr", about = "Look up Rust crate documentation from docs.rs")]
@@ -63,7 +64,30 @@ async fn run(cli: Cli) -> Result<()> {
 
     let (crate_name, path) = parse_query(&cli.query)?;
 
-    let fetched = fetch::fetch_crate(&crate_name, &cli.version, cli.refresh).await?;
+    let (effective_version, version_source) = if cli.version == "latest" {
+        match workspace::infer_dep_version(&crate_name) {
+            Some(v) => (v, VersionSource::Workspace),
+            None => ("latest".to_string(), VersionSource::Latest),
+        }
+    } else {
+        (cli.version.clone(), VersionSource::Explicit)
+    };
+
+    let is_workspace = matches!(version_source, VersionSource::Workspace);
+
+    let (fetched, latest_version) = if is_workspace {
+        let (fetched, latest) = tokio::join!(
+            fetch::fetch_crate(&crate_name, &effective_version, cli.refresh, version_source),
+            fetch::check_latest_version(&crate_name),
+        );
+        (fetched?, latest)
+    } else {
+        let fetched =
+            fetch::fetch_crate(&crate_name, &effective_version, cli.refresh, version_source)
+                .await?;
+        (fetched, None)
+    };
+
     let krate = &fetched.krate;
 
     let lookup::LookupResult {
@@ -71,7 +95,20 @@ async fn run(cli: Cli) -> Result<()> {
         reexport_source,
     } = lookup::lookup_item(krate, &path)?;
 
-    let mut body = format!("// {crate_name} {}\n\n", fetched.version);
+    let header = if is_workspace {
+        let annotation = match latest_version {
+            Some(ref latest) if *latest == fetched.version => {
+                " (from workspace, latest)".to_string()
+            }
+            Some(ref latest) => format!(" (from workspace; latest is {latest})"),
+            None => " (from workspace)".to_string(),
+        };
+        format!("// {crate_name} {}{annotation}\n\n", fetched.version)
+    } else {
+        format!("// {crate_name} {}\n\n", fetched.version)
+    };
+
+    let mut body = header;
 
     if let Some(source) = &reexport_source {
         body += &format!("// note: re-exported from {source}\n\n");
