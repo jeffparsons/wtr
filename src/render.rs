@@ -143,9 +143,7 @@ fn render_term(term: &Term) -> String {
 fn render_generic_bound(bound: &GenericBound) -> Option<String> {
     match bound {
         GenericBound::TraitBound {
-            trait_,
-            modifier,
-            ..
+            trait_, modifier, ..
         } => {
             let mut s = String::new();
             match modifier {
@@ -165,7 +163,12 @@ fn render_generic_bound(bound: &GenericBound) -> Option<String> {
 }
 
 fn render_fn_pointer(fp: &FunctionPointer) -> String {
-    let args: Vec<_> = fp.sig.inputs.iter().map(|(_, ty)| render_type(ty)).collect();
+    let args: Vec<_> = fp
+        .sig
+        .inputs
+        .iter()
+        .map(|(_, ty)| render_type(ty))
+        .collect();
     let mut s = format!("fn({})", args.join(", "));
     if let Some(ref out) = fp.sig.output {
         s.push_str(&format!(" -> {}", render_type(out)));
@@ -182,46 +185,43 @@ pub fn render_generics_params(generics: &Generics) -> String {
     let params: Vec<_> = generics
         .params
         .iter()
-        .filter_map(|p| {
-            match &p.kind {
-                GenericParamDefKind::Lifetime { outlives } => {
-                    let mut s = p.name.clone();
-                    if !outlives.is_empty() {
+        .filter_map(|p| match &p.kind {
+            GenericParamDefKind::Lifetime { outlives } => {
+                let mut s = p.name.clone();
+                if !outlives.is_empty() {
+                    s.push_str(": ");
+                    s.push_str(&outlives.join(" + "));
+                }
+                Some(s)
+            }
+            GenericParamDefKind::Type {
+                bounds,
+                default,
+                is_synthetic,
+            } => {
+                if *is_synthetic {
+                    return None;
+                }
+                let mut s = p.name.clone();
+                if !bounds.is_empty() {
+                    let rendered: Vec<_> = bounds.iter().filter_map(render_generic_bound).collect();
+                    if !rendered.is_empty() {
                         s.push_str(": ");
-                        s.push_str(&outlives.join(" + "));
+                        s.push_str(&rendered.join(" + "));
                     }
-                    Some(s)
                 }
-                GenericParamDefKind::Type {
-                    bounds,
-                    default,
-                    is_synthetic,
-                } => {
-                    if *is_synthetic {
-                        return None;
-                    }
-                    let mut s = p.name.clone();
-                    if !bounds.is_empty() {
-                        let rendered: Vec<_> =
-                            bounds.iter().filter_map(render_generic_bound).collect();
-                        if !rendered.is_empty() {
-                            s.push_str(": ");
-                            s.push_str(&rendered.join(" + "));
-                        }
-                    }
-                    if let Some(def) = default {
-                        s.push_str(" = ");
-                        s.push_str(&render_type(def));
-                    }
-                    Some(s)
+                if let Some(def) = default {
+                    s.push_str(" = ");
+                    s.push_str(&render_type(def));
                 }
-                GenericParamDefKind::Const { type_, default } => {
-                    let mut s = format!("const {}: {}", p.name, render_type(type_));
-                    if let Some(def) = default {
-                        s.push_str(&format!(" = {def}"));
-                    }
-                    Some(s)
+                Some(s)
+            }
+            GenericParamDefKind::Const { type_, default } => {
+                let mut s = format!("const {}: {}", p.name, render_type(type_));
+                if let Some(def) = default {
+                    s.push_str(&format!(" = {def}"));
                 }
+                Some(s)
             }
         })
         .collect();
@@ -240,11 +240,8 @@ pub fn render_where_clause(generics: &Generics) -> String {
         .where_predicates
         .iter()
         .filter_map(|pred| match pred {
-            WherePredicate::BoundPredicate {
-                type_, bounds, ..
-            } => {
-                let rendered: Vec<_> =
-                    bounds.iter().filter_map(render_generic_bound).collect();
+            WherePredicate::BoundPredicate { type_, bounds, .. } => {
+                let rendered: Vec<_> = bounds.iter().filter_map(render_generic_bound).collect();
                 if rendered.is_empty() {
                     None
                 } else {
@@ -332,11 +329,8 @@ fn render_visibility(vis: &Visibility) -> String {
 // ── Item rendering ──────────────────────────────────────────────────────
 
 fn first_doc_line(docs: &Option<String>) -> Option<&str> {
-    docs.as_deref().and_then(|d| {
-        d.lines()
-            .map(|l| l.trim())
-            .find(|l| !l.is_empty())
-    })
+    docs.as_deref()
+        .and_then(|d| d.lines().map(|l| l.trim()).find(|l| !l.is_empty()))
 }
 
 /// Render an item in summary mode (default).
@@ -395,8 +389,7 @@ pub fn render_item_summary(item: &Item, krate: &fetch::Crate) -> String {
             out.push_str(item.name.as_deref().unwrap_or("_"));
             out.push_str(&render_generics_params(&t.generics));
             if !t.bounds.is_empty() {
-                let rendered: Vec<_> =
-                    t.bounds.iter().filter_map(render_generic_bound).collect();
+                let rendered: Vec<_> = t.bounds.iter().filter_map(render_generic_bound).collect();
                 if !rendered.is_empty() {
                     out.push_str(": ");
                     out.push_str(&rendered.join(" + "));
@@ -406,12 +399,12 @@ pub fn render_item_summary(item: &Item, krate: &fetch::Crate) -> String {
             out.push_str(" {\n");
             // Show method signatures.
             for item_id in &t.items {
-                if let Some(assoc_item) = krate.index.get(item_id) {
-                    if let ItemEnum::Function(ref func) = assoc_item.inner {
-                        out.push_str("    ");
-                        out.push_str(&render_function_sig(assoc_item, func));
-                        out.push_str(";\n");
-                    }
+                if let Some(assoc_item) = krate.index.get(item_id)
+                    && let ItemEnum::Function(ref func) = assoc_item.inner
+                {
+                    out.push_str("    ");
+                    out.push_str(&render_function_sig(assoc_item, func));
+                    out.push_str(";\n");
                 }
             }
             out.push_str("}\n");
@@ -464,30 +457,29 @@ pub fn render_item_full(item: &Item, krate: &fetch::Crate) -> String {
     // For full mode, replace the first doc line with the complete docs.
     if let Some(ref docs) = item.docs {
         // Remove the summary doc line we already added.
-        if let Some(first_line) = first_doc_line(&Some(docs.clone())) {
-            if out.ends_with(&format!("{first_line}\n")) {
-                let trim_len = first_line.len() + 1;
-                out.truncate(out.len() - trim_len);
-            }
+        if let Some(first_line) = first_doc_line(&Some(docs.clone()))
+            && out.ends_with(&format!("{first_line}\n"))
+        {
+            let trim_len = first_line.len() + 1;
+            out.truncate(out.len() - trim_len);
         }
         out.push_str(docs.trim());
         out.push('\n');
     }
 
     // Show fields for structs.
-    if let ItemEnum::Struct(s) = &item.inner {
-        if let StructKind::Plain { fields, .. } = &s.kind {
-            if !fields.is_empty() {
-                out.push_str("\nFields:\n");
-                for field_id in fields {
-                    if let Some(field_item) = krate.index.get(field_id) {
-                        let name = field_item.name.as_deref().unwrap_or("_");
-                        if let ItemEnum::StructField(ref ty) = field_item.inner {
-                            out.push_str(&format!("  {name}: {}\n", render_type(ty)));
-                            if let Some(line) = first_doc_line(&field_item.docs) {
-                                out.push_str(&format!("    {line}\n"));
-                            }
-                        }
+    if let ItemEnum::Struct(s) = &item.inner
+        && let StructKind::Plain { fields, .. } = &s.kind
+        && !fields.is_empty()
+    {
+        out.push_str("\nFields:\n");
+        for field_id in fields {
+            if let Some(field_item) = krate.index.get(field_id) {
+                let name = field_item.name.as_deref().unwrap_or("_");
+                if let ItemEnum::StructField(ref ty) = field_item.inner {
+                    out.push_str(&format!("  {name}: {}\n", render_type(ty)));
+                    if let Some(line) = first_doc_line(&field_item.docs) {
+                        out.push_str(&format!("    {line}\n"));
                     }
                 }
             }
@@ -518,10 +510,7 @@ pub fn render_methods(item: &Item, krate: &fetch::Crate) -> String {
         return "No inherent methods found.\n".to_string();
     }
 
-    let mut out = format!(
-        "Methods for {}:\n\n",
-        item.name.as_deref().unwrap_or("_")
-    );
+    let mut out = format!("Methods for {}:\n\n", item.name.as_deref().unwrap_or("_"));
     for method in &methods {
         if let ItemEnum::Function(ref func) = method.inner {
             out.push_str(&render_function_sig(method, func));
@@ -555,13 +544,10 @@ pub fn render_trait_impls(item: &Item, krate: &fetch::Crate) -> String {
             out.push_str(&format!(" for {}\n", render_type(&impl_data.for_)));
             // List methods provided.
             for assoc_id in &impl_data.items {
-                if let Some(assoc_item) = krate.index.get(assoc_id) {
-                    if let ItemEnum::Function(ref func) = assoc_item.inner {
-                        out.push_str(&format!(
-                            "  {}\n",
-                            render_function_sig(assoc_item, func)
-                        ));
-                    }
+                if let Some(assoc_item) = krate.index.get(assoc_id)
+                    && let ItemEnum::Function(ref func) = assoc_item.inner
+                {
+                    out.push_str(&format!("  {}\n", render_function_sig(assoc_item, func)));
                 }
             }
             out.push('\n');
@@ -593,19 +579,13 @@ pub fn render_suggestions(
     let mut suggestions = Vec::new();
 
     if !used_methods && has_impls {
-        suggestions.push(format!(
-            "  wtr {query} --methods    List methods"
-        ));
+        suggestions.push(format!("  wtr {query} --methods    List methods"));
     }
     if !used_full {
-        suggestions.push(format!(
-            "  wtr {query} --full       Full documentation"
-        ));
+        suggestions.push(format!("  wtr {query} --full       Full documentation"));
     }
     if !used_traits && has_impls {
-        suggestions.push(format!(
-            "  wtr {query} --traits     Trait implementations"
-        ));
+        suggestions.push(format!("  wtr {query} --traits     Trait implementations"));
     }
 
     if suggestions.is_empty() {
@@ -631,7 +611,8 @@ pub fn print_output(body: &str, suggestions: &str, no_color: bool) {
     if !suggestions.is_empty() {
         if use_color(no_color) {
             let mut skin = termimad::MadSkin::default();
-            skin.paragraph.set_fg(termimad::crossterm::style::Color::DarkGrey);
+            skin.paragraph
+                .set_fg(termimad::crossterm::style::Color::DarkGrey);
             skin.print_text(suggestions);
         } else {
             print!("{suggestions}");

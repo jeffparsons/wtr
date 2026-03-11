@@ -82,33 +82,30 @@ fn save_to_cache(crate_name: &str, version: &str, json_bytes: &[u8]) -> Result<(
 }
 
 /// Fetch rustdoc JSON for a crate from docs.rs, with disk caching.
-pub async fn fetch_crate(
-    crate_name: &str,
-    version: &str,
-    refresh: bool,
-) -> Result<FetchedCrate> {
+pub async fn fetch_crate(crate_name: &str, version: &str, refresh: bool) -> Result<FetchedCrate> {
     let is_latest = version == "latest";
 
     // For "latest", try to resolve from sidecar cache first.
-    if is_latest && !refresh {
-        if let Some(resolved) = read_latest_sidecar(crate_name)? {
-            if let Some(krate) = load_cached(crate_name, &resolved)? {
-                return Ok(FetchedCrate {
-                    krate,
-                    version: resolved,
-                });
-            }
-        }
+    if is_latest
+        && !refresh
+        && let Some(resolved) = read_latest_sidecar(crate_name)?
+        && let Some(krate) = load_cached(crate_name, &resolved)?
+    {
+        return Ok(FetchedCrate {
+            krate,
+            version: resolved,
+        });
     }
 
     // For explicit versions, try cache directly.
-    if !is_latest && !refresh {
-        if let Some(krate) = load_cached(crate_name, version)? {
-            return Ok(FetchedCrate {
-                krate,
-                version: version.to_string(),
-            });
-        }
+    if !is_latest
+        && !refresh
+        && let Some(krate) = load_cached(crate_name, version)?
+    {
+        return Ok(FetchedCrate {
+            krate,
+            version: version.to_string(),
+        });
     }
 
     // Fetch from docs.rs.
@@ -141,8 +138,8 @@ pub async fn fetch_crate(
         .context("failed to read response body")?;
 
     // Decompress zstd.
-    let mut decoder = zstd::Decoder::new(compressed.as_ref())
-        .context("failed to initialize zstd decoder")?;
+    let mut decoder =
+        zstd::Decoder::new(compressed.as_ref()).context("failed to initialize zstd decoder")?;
     let mut json_bytes = Vec::new();
     decoder
         .read_to_end(&mut json_bytes)
@@ -162,10 +159,8 @@ pub async fn fetch_crate(
     }
 
     // Update the latest sidecar.
-    if is_latest {
-        if let Err(e) = write_latest_sidecar(crate_name, &resolved_version) {
-            eprintln!("warning: failed to write latest sidecar: {e}");
-        }
+    if is_latest && let Err(e) = write_latest_sidecar(crate_name, &resolved_version) {
+        eprintln!("warning: failed to write latest sidecar: {e}");
     }
 
     Ok(FetchedCrate {

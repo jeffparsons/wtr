@@ -63,11 +63,7 @@ fn lookup_top_level_struct_rangeset() {
 #[test]
 fn lookup_method() {
     let krate = load_rangemap_v1_7_1();
-    let item = lookup::lookup_item(
-        &krate,
-        &["RangeMap".into(), "insert".into()],
-    )
-    .unwrap();
+    let item = lookup::lookup_item(&krate, &["RangeMap".into(), "insert".into()]).unwrap();
     assert!(matches!(item.inner, rustdoc_types::ItemEnum::Function(_)));
     assert_eq!(item.name.as_deref(), Some("insert"));
 }
@@ -82,10 +78,7 @@ fn lookup_nonexistent_item_fails() {
 #[test]
 fn lookup_nonexistent_method_fails() {
     let krate = load_rangemap_v1_7_1();
-    let result = lookup::lookup_item(
-        &krate,
-        &["RangeMap".into(), "nonexistent_method".into()],
-    );
+    let result = lookup::lookup_item(&krate, &["RangeMap".into(), "nonexistent_method".into()]);
     assert!(result.is_err());
 }
 
@@ -102,11 +95,7 @@ fn v54_lookup_struct() {
 #[test]
 fn v54_lookup_method() {
     let krate = load_rangemap_v1_6_0();
-    let item = lookup::lookup_item(
-        &krate,
-        &["RangeMap".into(), "insert".into()],
-    )
-    .unwrap();
+    let item = lookup::lookup_item(&krate, &["RangeMap".into(), "insert".into()]).unwrap();
     assert!(matches!(item.inner, rustdoc_types::ItemEnum::Function(_)));
     assert_eq!(item.name.as_deref(), Some("insert"));
 }
@@ -119,10 +108,7 @@ fn find_methods_returns_methods() {
     let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
     let methods = lookup::find_methods(&krate, item);
     assert!(!methods.is_empty(), "RangeMap should have methods");
-    let names: Vec<_> = methods
-        .iter()
-        .filter_map(|m| m.name.as_deref())
-        .collect();
+    let names: Vec<_> = methods.iter().filter_map(|m| m.name.as_deref()).collect();
     assert!(names.contains(&"insert"), "should have insert method");
     assert!(names.contains(&"get"), "should have get method");
 }
@@ -147,17 +133,16 @@ fn render_struct_summary() {
     let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
     let output = render::render_item_summary(item, &krate);
     assert!(output.contains("struct RangeMap"), "output: {output}");
-    assert!(output.contains("pub"), "should show pub visibility: {output}");
+    assert!(
+        output.contains("pub"),
+        "should show pub visibility: {output}"
+    );
 }
 
 #[test]
 fn render_method_signature() {
     let krate = load_rangemap_v1_7_1();
-    let item = lookup::lookup_item(
-        &krate,
-        &["RangeMap".into(), "insert".into()],
-    )
-    .unwrap();
+    let item = lookup::lookup_item(&krate, &["RangeMap".into(), "insert".into()]).unwrap();
     let output = render::render_item_summary(item, &krate);
     assert!(output.contains("fn insert"), "output: {output}");
 }
@@ -219,31 +204,25 @@ fn v54_render_methods() {
 fn suggestions_for_struct() {
     let krate = load_rangemap_v1_7_1();
     let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
-    let suggestions = render::render_suggestions(
-        "rangemap",
-        &["RangeMap".into()],
-        item,
-        false,
-        false,
-        false,
+    let suggestions =
+        render::render_suggestions("rangemap", &["RangeMap".into()], item, false, false, false);
+    assert!(
+        suggestions.contains("--methods"),
+        "suggestions: {suggestions}"
     );
-    assert!(suggestions.contains("--methods"), "suggestions: {suggestions}");
     assert!(suggestions.contains("--full"), "suggestions: {suggestions}");
-    assert!(suggestions.contains("--traits"), "suggestions: {suggestions}");
+    assert!(
+        suggestions.contains("--traits"),
+        "suggestions: {suggestions}"
+    );
 }
 
 #[test]
 fn suggestions_omit_used_flags() {
     let krate = load_rangemap_v1_7_1();
     let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
-    let suggestions = render::render_suggestions(
-        "rangemap",
-        &["RangeMap".into()],
-        item,
-        false,
-        true,
-        false,
-    );
+    let suggestions =
+        render::render_suggestions("rangemap", &["RangeMap".into()], item, false, true, false);
     assert!(!suggestions.contains("--methods"), "should omit --methods");
     assert!(suggestions.contains("--full"), "should still have --full");
 }
@@ -252,25 +231,15 @@ fn suggestions_omit_used_flags() {
 fn suggestions_empty_when_all_used() {
     let krate = load_rangemap_v1_7_1();
     let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
-    let suggestions = render::render_suggestions(
-        "rangemap",
-        &["RangeMap".into()],
-        item,
-        true,
-        true,
-        true,
-    );
+    let suggestions =
+        render::render_suggestions("rangemap", &["RangeMap".into()], item, true, true, true);
     assert!(suggestions.is_empty(), "should be empty: {suggestions}");
 }
 
 #[test]
 fn no_suggestions_for_function() {
     let krate = load_rangemap_v1_7_1();
-    let item = lookup::lookup_item(
-        &krate,
-        &["RangeMap".into(), "insert".into()],
-    )
-    .unwrap();
+    let item = lookup::lookup_item(&krate, &["RangeMap".into(), "insert".into()]).unwrap();
     let suggestions = render::render_suggestions(
         "rangemap",
         &["RangeMap".into(), "insert".into()],
@@ -280,8 +249,14 @@ fn no_suggestions_for_function() {
         false,
     );
     // Functions don't have --methods or --traits suggestions.
-    assert!(!suggestions.contains("--methods"), "suggestions: {suggestions}");
-    assert!(!suggestions.contains("--traits"), "suggestions: {suggestions}");
+    assert!(
+        !suggestions.contains("--methods"),
+        "suggestions: {suggestions}"
+    );
+    assert!(
+        !suggestions.contains("--traits"),
+        "suggestions: {suggestions}"
+    );
     // But should still suggest --full.
     assert!(suggestions.contains("--full"), "suggestions: {suggestions}");
 }

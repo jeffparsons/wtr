@@ -27,10 +27,10 @@ pub fn lookup_item<'a>(krate: &'a Crate, path: &[String]) -> Result<&'a Item> {
         let (type_path, method_name) = path.split_at(path.len() - 1);
         let method_name = &method_name[0];
 
-        if let Some(type_item) = find_by_path(krate, type_path) {
-            if let Some(method) = find_assoc_item(krate, type_item, method_name) {
-                return Ok(method);
-            }
+        if let Some(type_item) = find_by_path(krate, type_path)
+            && let Some(method) = find_assoc_item(krate, type_item, method_name)
+        {
+            return Ok(method);
         }
     }
 
@@ -44,12 +44,12 @@ fn find_by_path<'a>(krate: &'a Crate, query: &[String]) -> Option<&'a Item> {
     for (id, summary) in &krate.paths {
         // The summary path includes the crate name as the first element,
         // so we check if the tail matches our query.
-        if summary.path.len() >= query.len() + 1 {
+        if summary.path.len() > query.len() {
             let tail = &summary.path[summary.path.len() - query.len()..];
-            if tail == query {
-                if let Some(item) = krate.index.get(id) {
-                    return Some(item);
-                }
+            if tail == query
+                && let Some(item) = krate.index.get(id)
+            {
+                return Some(item);
             }
         }
     }
@@ -63,10 +63,10 @@ fn find_assoc_item<'a>(krate: &'a Crate, type_item: &Item, name: &str) -> Option
         let impl_item = krate.index.get(impl_id)?;
         if let ItemEnum::Impl(ref impl_data) = impl_item.inner {
             for item_id in &impl_data.items {
-                if let Some(item) = krate.index.get(item_id) {
-                    if item.name.as_deref() == Some(name) {
-                        return Some(item);
-                    }
+                if let Some(item) = krate.index.get(item_id)
+                    && item.name.as_deref() == Some(name)
+                {
+                    return Some(item);
                 }
             }
         }

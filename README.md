@@ -19,5 +19,9 @@ wtr jiff::Timestamp::now
 ## Limitations
 
 - Only works with crates published to docs.rs after 2025-05-23 (when rustdoc JSON became available).
-- Tied to a specific rustdoc JSON format version (currently v57). Crates whose docs were built with a different format version will fail with a clear error.
+- Supports rustdoc JSON format versions 39–57, but older versions may be missing some fields. Crates whose docs were built with a format version outside this range will fail with a clear error.
 - No search/fuzzy matching — you need to know the exact item path.
+
+## License
+
+This project is released into the public domain — see [UNLICENSE](UNLICENSE) for details.

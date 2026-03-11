@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
-use wtr::{fetch, lookup, render};
 use clap::Parser;
+use wtr::{fetch, lookup, render};
 
 #[derive(Parser)]
 #[command(name = "wtr", about = "Look up Rust crate documentation from docs.rs")]
