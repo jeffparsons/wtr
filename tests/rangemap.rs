@@ -1,32 +1,42 @@
 use std::fs;
 
-use wtr::fetch::parse_rustdoc_json;
+use wtr::fetch::{self, parse_rustdoc_json};
 use wtr::lookup;
 use wtr::render;
 
-fn load_rangemap_v1_7_1() -> rustdoc_types::Crate {
-    let bytes = fs::read("tests/fixtures/rangemap-1.7.1.json").unwrap();
+fn load_rangemap(fixture: &str) -> fetch::Crate {
+    let bytes = fs::read(fixture).unwrap();
     parse_rustdoc_json(&bytes, "rangemap").unwrap()
+}
+
+fn load_rangemap_v1_7_1() -> fetch::Crate {
+    load_rangemap("tests/fixtures/rangemap-1.7.1.json")
+}
+
+fn load_rangemap_v1_6_0() -> fetch::Crate {
+    load_rangemap("tests/fixtures/rangemap-1.6.0.json")
 }
 
 // ── Format version ──────────────────────────────────────────────────────
 
 #[test]
-fn format_version_mismatch_gives_clear_error() {
-    let bytes = fs::read("tests/fixtures/rangemap-1.6.0.json").unwrap();
-    let err = parse_rustdoc_json(&bytes, "rangemap").unwrap_err();
+fn v54_json_parses_successfully() {
+    let krate = load_rangemap_v1_6_0();
+    assert!(krate.crate_version.as_deref() == Some("1.6.0"));
+}
+
+#[test]
+fn unsupported_old_format_version_gives_clear_error() {
+    let json = br#"{"format_version": 1, "root": 0, "index": {}, "paths": {}}"#;
+    let err = parse_rustdoc_json(json, "fake").unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("format version"),
-        "expected format version error, got: {msg}"
-    );
-    assert!(
-        msg.contains("54"),
-        "expected mention of format 54, got: {msg}"
+        msg.contains("too old"),
+        "expected 'too old' error, got: {msg}"
     );
 }
 
-// ── Lookup ──────────────────────────────────────────────────────────────
+// ── Lookup (v57) ────────────────────────────────────────────────────────
 
 #[test]
 fn lookup_crate_root() {
@@ -79,6 +89,28 @@ fn lookup_nonexistent_method_fails() {
     assert!(result.is_err());
 }
 
+// ── Lookup (v54) ────────────────────────────────────────────────────────
+
+#[test]
+fn v54_lookup_struct() {
+    let krate = load_rangemap_v1_6_0();
+    let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
+    assert!(matches!(item.inner, rustdoc_types::ItemEnum::Struct(_)));
+    assert_eq!(item.name.as_deref(), Some("RangeMap"));
+}
+
+#[test]
+fn v54_lookup_method() {
+    let krate = load_rangemap_v1_6_0();
+    let item = lookup::lookup_item(
+        &krate,
+        &["RangeMap".into(), "insert".into()],
+    )
+    .unwrap();
+    assert!(matches!(item.inner, rustdoc_types::ItemEnum::Function(_)));
+    assert_eq!(item.name.as_deref(), Some("insert"));
+}
+
 // ── find_methods / find_trait_impls ─────────────────────────────────────
 
 #[test]
@@ -107,7 +139,7 @@ fn find_trait_impls_returns_impls() {
     );
 }
 
-// ── Rendering ───────────────────────────────────────────────────────────
+// ── Rendering (v57) ─────────────────────────────────────────────────────
 
 #[test]
 fn render_struct_summary() {
@@ -145,7 +177,6 @@ fn render_full_includes_docs() {
     let krate = load_rangemap_v1_7_1();
     let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
     let output = render::render_item_full(item, &krate);
-    // Full output should be longer than summary.
     let summary = render::render_item_summary(item, &krate);
     assert!(
         output.len() > summary.len(),
@@ -162,6 +193,24 @@ fn render_trait_impls_output() {
         output.contains("Trait implementations for RangeMap"),
         "output: {output}"
     );
+}
+
+// ── Rendering (v54) ─────────────────────────────────────────────────────
+
+#[test]
+fn v54_render_struct_summary() {
+    let krate = load_rangemap_v1_6_0();
+    let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
+    let output = render::render_item_summary(item, &krate);
+    assert!(output.contains("struct RangeMap"), "output: {output}");
+}
+
+#[test]
+fn v54_render_methods() {
+    let krate = load_rangemap_v1_6_0();
+    let item = lookup::lookup_item(&krate, &["RangeMap".into()]).unwrap();
+    let output = render::render_methods(item, &krate);
+    assert!(output.contains("fn insert"), "output: {output}");
 }
 
 // ── Suggestions ─────────────────────────────────────────────────────────

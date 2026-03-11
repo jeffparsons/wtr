@@ -1,6 +1,7 @@
 use rustdoc_types::*;
 use std::io::IsTerminal;
 
+use crate::fetch;
 use crate::lookup;
 
 // ── Type rendering ──────────────────────────────────────────────────────
@@ -339,7 +340,7 @@ fn first_doc_line(docs: &Option<String>) -> Option<&str> {
 }
 
 /// Render an item in summary mode (default).
-pub fn render_item_summary(item: &Item, krate: &rustdoc_types::Crate) -> String {
+pub fn render_item_summary(item: &Item, krate: &fetch::Crate) -> String {
     let mut out = String::new();
 
     match &item.inner {
@@ -457,7 +458,7 @@ pub fn render_item_summary(item: &Item, krate: &rustdoc_types::Crate) -> String 
 }
 
 /// Render full documentation for an item.
-pub fn render_item_full(item: &Item, krate: &rustdoc_types::Crate) -> String {
+pub fn render_item_full(item: &Item, krate: &fetch::Crate) -> String {
     let mut out = render_item_summary(item, krate);
 
     // For full mode, replace the first doc line with the complete docs.
@@ -511,7 +512,7 @@ pub fn render_item_full(item: &Item, krate: &rustdoc_types::Crate) -> String {
 }
 
 /// Render methods list for a type.
-pub fn render_methods(item: &Item, krate: &rustdoc_types::Crate) -> String {
+pub fn render_methods(item: &Item, krate: &fetch::Crate) -> String {
     let methods = lookup::find_methods(krate, item);
     if methods.is_empty() {
         return "No inherent methods found.\n".to_string();
@@ -535,7 +536,7 @@ pub fn render_methods(item: &Item, krate: &rustdoc_types::Crate) -> String {
 }
 
 /// Render trait implementations for a type.
-pub fn render_trait_impls(item: &Item, krate: &rustdoc_types::Crate) -> String {
+pub fn render_trait_impls(item: &Item, krate: &fetch::Crate) -> String {
     let impls = lookup::find_trait_impls(krate, item);
     if impls.is_empty() {
         return "No trait implementations found.\n".to_string();

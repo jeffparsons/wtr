@@ -1,5 +1,7 @@
 use anyhow::{Result, bail};
-use rustdoc_types::{Crate, Id, Item, ItemEnum};
+use rustdoc_types::{Id, Item, ItemEnum};
+
+use crate::fetch::Crate;
 
 /// Find an item by path components (e.g. `["Timestamp"]` or `["de", "Deserialize"]`).
 ///

@@ -1,14 +1,26 @@
 use anyhow::{Context, Result, bail};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-const SUPPORTED_FORMAT: u32 = rustdoc_types::FORMAT_VERSION;
+const MIN_FORMAT_VERSION: u32 = 39;
+
+/// Our own Crate struct containing only the fields we use.
+/// This lets us parse older rustdoc JSON format versions (v39+) that may
+/// have incompatible types in fields we don't need (e.g. `external_crates`).
+#[derive(Debug, serde::Deserialize)]
+pub struct Crate {
+    pub root: rustdoc_types::Id,
+    pub crate_version: Option<String>,
+    pub index: HashMap<rustdoc_types::Id, rustdoc_types::Item>,
+    pub paths: HashMap<rustdoc_types::Id, rustdoc_types::ItemSummary>,
+}
 
 /// Resolved crate data: the parsed rustdoc JSON plus the resolved version string.
 pub struct FetchedCrate {
-    pub krate: rustdoc_types::Crate,
+    pub krate: Crate,
     pub version: String,
 }
 
@@ -51,15 +63,13 @@ fn cached_json_path(crate_name: &str, version: &str) -> Result<PathBuf> {
     Ok(crate_cache_dir(crate_name)?.join(format!("{version}.json")))
 }
 
-fn load_cached(crate_name: &str, version: &str) -> Result<Option<rustdoc_types::Crate>> {
+fn load_cached(crate_name: &str, version: &str) -> Result<Option<Crate>> {
     let path = cached_json_path(crate_name, version)?;
     if !path.exists() {
         return Ok(None);
     }
-    let file = fs::File::open(&path)?;
-    let reader = std::io::BufReader::new(file);
-    let krate: rustdoc_types::Crate = serde_json::from_reader(reader)
-        .context("failed to parse cached rustdoc JSON")?;
+    let bytes = fs::read(&path)?;
+    let krate = parse_rustdoc_json(&bytes, crate_name)?;
     Ok(Some(krate))
 }
 
@@ -165,28 +175,37 @@ pub async fn fetch_crate(
 }
 
 /// Parse rustdoc JSON from bytes, checking format version first.
-pub fn parse_rustdoc_json(json_bytes: &[u8], crate_name: &str) -> Result<rustdoc_types::Crate> {
-    check_format_version(json_bytes, crate_name)?;
-    serde_json::from_slice(json_bytes).context("failed to parse rustdoc JSON")
+pub fn parse_rustdoc_json(json_bytes: &[u8], crate_name: &str) -> Result<Crate> {
+    let version = read_format_version(json_bytes)?;
+    if version < MIN_FORMAT_VERSION {
+        bail!(
+            "rustdoc JSON for `{crate_name}` uses format version {version}, \
+             which is too old (minimum supported: {MIN_FORMAT_VERSION})"
+        );
+    }
+    if version != rustdoc_types::FORMAT_VERSION {
+        eprintln!(
+            "warning: rustdoc JSON for `{crate_name}` uses format version {version} \
+             (expected {}).",
+            rustdoc_types::FORMAT_VERSION
+        );
+    }
+    serde_json::from_slice(json_bytes).with_context(|| {
+        format!(
+            "failed to parse rustdoc JSON for `{crate_name}` \
+             (format version {version}, expected {})",
+            rustdoc_types::FORMAT_VERSION
+        )
+    })
 }
 
-/// Extract `format_version` from the JSON without full deserialization
-/// and check it matches what we support.
-fn check_format_version(json_bytes: &[u8], crate_name: &str) -> Result<()> {
+/// Extract `format_version` from the JSON without full deserialization.
+fn read_format_version(json_bytes: &[u8]) -> Result<u32> {
     #[derive(serde::Deserialize)]
     struct Partial {
         format_version: u32,
     }
     let partial: Partial = serde_json::from_slice(json_bytes)
         .context("failed to read format_version from rustdoc JSON")?;
-    if partial.format_version != SUPPORTED_FORMAT {
-        bail!(
-            "rustdoc JSON for `{crate_name}` uses format version {}, \
-             but wtr supports version {SUPPORTED_FORMAT}.\n\
-             The crate may need to be republished to get updated docs, \
-             or wtr needs to be updated.",
-            partial.format_version
-        );
-    }
-    Ok(())
+    Ok(partial.format_version)
 }
