@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Find the highest-priority open issue to work on.
+# Priority: P1/bug labels first, then lowest issue number.
+set -euo pipefail
+
+issues=$(gh issue list --json number,title,labels --limit 100)
+
+# Exit if no open issues.
+if [ "$(echo "$issues" | jq 'length')" -eq 0 ]; then
+    echo "No open issues." >&2
+    exit 1
+fi
+
+# Sort: issues with P1 or bug labels first, then by lowest number.
+echo "$issues" | jq -r '
+    sort_by(
+        (if (.labels | map(.name) | any(. == "P1" or . == "bug"))
+         then 0 else 1 end),
+        .number
+    )
+    | .[0]
+    | "#\(.number) \(.title)"
+'

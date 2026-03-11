@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# View a GitHub issue's body and comments together.
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+    echo "Usage: gh-issue-view <issue-number>" >&2
+    exit 1
+fi
+
+gh issue view "$1"
+echo
+echo "--- Comments ---"
+echo
+gh issue view "$1" --comments
