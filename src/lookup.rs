@@ -3,22 +3,41 @@ use rustdoc_types::{Id, Item, ItemEnum};
 
 use crate::fetch::Crate;
 
+/// Result of looking up an item, with optional re-export metadata.
+pub struct LookupResult<'a> {
+    pub item: &'a Item,
+    /// If the item was found via a re-export, the source path from the `use` item.
+    pub reexport_source: Option<String>,
+}
+
 /// Find an item by path components (e.g. `["Timestamp"]` or `["de", "Deserialize"]`).
 ///
 /// For method lookups like `["Timestamp", "now"]`, first finds the type,
 /// then searches its impl blocks for the method.
-pub fn lookup_item<'a>(krate: &'a Crate, path: &[String]) -> Result<&'a Item> {
+pub fn lookup_item<'a>(krate: &'a Crate, path: &[String]) -> Result<LookupResult<'a>> {
     if path.is_empty() {
         // Return the root module.
-        return krate
+        let item = krate
             .index
             .get(&krate.root)
-            .ok_or_else(|| anyhow::anyhow!("root item not found in index"));
+            .ok_or_else(|| anyhow::anyhow!("root item not found in index"))?;
+        return Ok(LookupResult {
+            item,
+            reexport_source: None,
+        });
     }
 
     // Try direct path match first (works for top-level items and nested module paths).
     if let Some(item) = find_by_path(krate, path) {
-        return Ok(item);
+        return Ok(LookupResult {
+            item,
+            reexport_source: None,
+        });
+    }
+
+    // Try module-tree walk (finds re-exported items).
+    if let Some(result) = find_by_module_walk(krate, path) {
+        return Ok(result);
     }
 
     // Try as a method/associated item: treat last component as method name,
@@ -27,10 +46,21 @@ pub fn lookup_item<'a>(krate: &'a Crate, path: &[String]) -> Result<&'a Item> {
         let (type_path, method_name) = path.split_at(path.len() - 1);
         let method_name = &method_name[0];
 
-        if let Some(type_item) = find_by_path(krate, type_path)
-            && let Some(method) = find_assoc_item(krate, type_item, method_name)
+        // Try find_by_path for the type first.
+        let type_result = find_by_path(krate, type_path)
+            .map(|item| LookupResult {
+                item,
+                reexport_source: None,
+            })
+            .or_else(|| find_by_module_walk(krate, type_path));
+
+        if let Some(type_result) = type_result
+            && let Some(method) = find_assoc_item(krate, type_result.item, method_name)
         {
-            return Ok(method);
+            return Ok(LookupResult {
+                item: method,
+                reexport_source: type_result.reexport_source,
+            });
         }
     }
 
@@ -53,6 +83,80 @@ fn find_by_path<'a>(krate: &'a Crate, query: &[String]) -> Option<&'a Item> {
             }
         }
     }
+    None
+}
+
+/// Walk the module tree to find an item by matching query components left-to-right.
+///
+/// This handles re-exported items that aren't in `krate.paths` under the
+/// public path (e.g., `RangeMap` re-exported from `map::RangeMap`).
+pub fn find_by_module_walk<'a>(krate: &'a Crate, query: &[String]) -> Option<LookupResult<'a>> {
+    let root_item = krate.index.get(&krate.root)?;
+    let ItemEnum::Module(ref root_module) = root_item.inner else {
+        return None;
+    };
+
+    walk_module_children(krate, &root_module.items, query)
+}
+
+/// Recursively walk module children matching query components.
+fn walk_module_children<'a>(
+    krate: &'a Crate,
+    children: &[Id],
+    query: &[String],
+) -> Option<LookupResult<'a>> {
+    if query.is_empty() {
+        return None;
+    }
+
+    let target_name = &query[0];
+    let remaining = &query[1..];
+
+    for child_id in children {
+        let Some(child_item) = krate.index.get(child_id) else {
+            continue;
+        };
+
+        match &child_item.inner {
+            ItemEnum::Use(use_data) => {
+                if &use_data.name == target_name {
+                    if remaining.is_empty() {
+                        // Final component matched a re-export; follow to target.
+                        let target_item = use_data
+                            .id
+                            .as_ref()
+                            .and_then(|id| krate.index.get(id))?;
+                        return Some(LookupResult {
+                            item: target_item,
+                            reexport_source: Some(use_data.source.clone()),
+                        });
+                    }
+                    // Intermediate component matched a re-export pointing to a module.
+                    if let Some(id) = &use_data.id
+                        && let Some(target_item) = krate.index.get(id)
+                        && let ItemEnum::Module(ref module) = target_item.inner
+                    {
+                        return walk_module_children(krate, &module.items, remaining);
+                    }
+                }
+            }
+            _ => {
+                if child_item.name.as_deref() == Some(target_name) {
+                    if remaining.is_empty() {
+                        return Some(LookupResult {
+                            item: child_item,
+                            reexport_source: None,
+                        });
+                    }
+                    // If it's a module, recurse into it.
+                    if let ItemEnum::Module(ref module) = child_item.inner {
+                        return walk_module_children(krate, &module.items, remaining);
+                    }
+                }
+            }
+        }
+    }
+
     None
 }
 

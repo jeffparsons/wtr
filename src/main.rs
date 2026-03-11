@@ -66,9 +66,16 @@ async fn run(cli: Cli) -> Result<()> {
     let fetched = fetch::fetch_crate(&crate_name, &cli.version, cli.refresh).await?;
     let krate = &fetched.krate;
 
-    let item = lookup::lookup_item(krate, &path)?;
+    let lookup::LookupResult {
+        item,
+        reexport_source,
+    } = lookup::lookup_item(krate, &path)?;
 
     let mut body = format!("// {crate_name} {}\n\n", fetched.version);
+
+    if let Some(source) = &reexport_source {
+        body += &format!("// note: re-exported from {source}\n\n");
+    }
 
     body += &(if show_full {
         render::render_item_full(item, krate)
