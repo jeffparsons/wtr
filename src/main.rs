@@ -9,6 +9,9 @@ struct Cli {
     /// Item path, e.g. "jiff::Timestamp", "serde::Serialize", "tokio::spawn"
     query: String,
 
+    /// Search for items by name within the crate (e.g. "wtr bevy Material")
+    search: Option<String>,
+
     /// Show full documentation
     #[arg(short, long)]
     full: bool,
@@ -90,11 +93,6 @@ async fn run(cli: Cli) -> Result<()> {
 
     let krate = &fetched.krate;
 
-    let lookup::LookupResult {
-        item,
-        reexport_source,
-    } = lookup::lookup_item(krate, &path)?;
-
     let header = if is_workspace {
         let annotation = match latest_version {
             Some(ref latest) if *latest == fetched.version => {
@@ -107,6 +105,30 @@ async fn run(cli: Cli) -> Result<()> {
     } else {
         format!("// {crate_name} {}\n\n", fetched.version)
     };
+
+    // Search mode: find items by name within the crate.
+    if let Some(ref search_term) = cli.search {
+        let results = lookup::search_items(krate, search_term);
+        let mut body = header;
+        if results.is_empty() {
+            body += &format!("No items matching \"{search_term}\" found.\n");
+        } else {
+            body += &format!(
+                "Search results for \"{}\" ({} found):\n\n",
+                search_term,
+                results.len()
+            );
+            body += &render::render_search_results(&results, &crate_name);
+        }
+        render::print_output(&body, "", cli.no_color);
+        return Ok(());
+    }
+
+    // Normal lookup mode.
+    let lookup::LookupResult {
+        item,
+        reexport_source,
+    } = lookup::lookup_item(krate, &path)?;
 
     let mut body = header;
 
@@ -134,6 +156,7 @@ async fn run(cli: Cli) -> Result<()> {
         &crate_name,
         &path,
         item,
+        krate,
         show_full,
         show_methods,
         show_traits,

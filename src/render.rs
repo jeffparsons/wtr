@@ -500,7 +500,70 @@ pub fn render_item_full(item: &Item, krate: &fetch::Crate) -> String {
         }
     }
 
+    // Show children for modules.
+    if let ItemEnum::Module(module) = &item.inner {
+        render_module_children(&mut out, &module.items, krate);
+    }
+
     out
+}
+
+/// The kind groups for module children, in display order.
+type KindPredicate = fn(&ItemEnum) -> bool;
+const MODULE_CHILD_GROUPS: &[(&str, KindPredicate)] = &[
+    ("Modules", |i| matches!(i, ItemEnum::Module(_))),
+    ("Structs", |i| matches!(i, ItemEnum::Struct(_))),
+    ("Enums", |i| matches!(i, ItemEnum::Enum(_))),
+    ("Traits", |i| matches!(i, ItemEnum::Trait(_))),
+    ("Functions", |i| matches!(i, ItemEnum::Function(_))),
+    ("Type Aliases", |i| matches!(i, ItemEnum::TypeAlias(_))),
+    ("Constants", |i| matches!(i, ItemEnum::Constant { .. })),
+    ("Re-exports", |i| matches!(i, ItemEnum::Use(_))),
+];
+
+fn render_module_children(out: &mut String, items: &[Id], krate: &fetch::Crate) {
+    // Collect all named children.
+    struct Child<'a> {
+        name: &'a str,
+        docs: &'a Option<String>,
+        inner: &'a ItemEnum,
+    }
+
+    let mut children: Vec<Child> = items
+        .iter()
+        .filter_map(|id| krate.index.get(id))
+        .filter_map(|child| {
+            let name = match &child.inner {
+                ItemEnum::Use(use_data) => Some(use_data.name.as_str()),
+                _ => child.name.as_deref(),
+            };
+            name.map(|n| Child {
+                name: n,
+                docs: &child.docs,
+                inner: &child.inner,
+            })
+        })
+        .collect();
+
+    if children.is_empty() {
+        return;
+    }
+
+    children.sort_by_key(|c| c.name);
+
+    for &(heading, predicate) in MODULE_CHILD_GROUPS {
+        let group: Vec<&Child> = children.iter().filter(|c| predicate(c.inner)).collect();
+        if group.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("\n{heading}:\n"));
+        for child in &group {
+            out.push_str(&format!("  {}\n", child.name));
+            if let Some(line) = first_doc_line(child.docs) {
+                out.push_str(&format!("    {line}\n"));
+            }
+        }
+    }
 }
 
 /// Render methods list for a type.
@@ -561,6 +624,7 @@ pub fn render_suggestions(
     crate_name: &str,
     path: &[String],
     item: &Item,
+    krate: &fetch::Crate,
     used_full: bool,
     used_methods: bool,
     used_traits: bool,
@@ -588,6 +652,15 @@ pub fn render_suggestions(
         suggestions.push(format!("  wtr {query} --traits     Trait implementations"));
     }
 
+    // For modules viewed with --full, suggest notable child paths.
+    if used_full
+        && let ItemEnum::Module(module) = &item.inner
+    {
+        let child_suggestions =
+            module_child_suggestions(crate_name, path, &module.items, krate, 5);
+        suggestions.extend(child_suggestions);
+    }
+
     if suggestions.is_empty() {
         return String::new();
     }
@@ -597,6 +670,119 @@ pub fn render_suggestions(
         out.push_str(s);
         out.push('\n');
     }
+    out
+}
+
+/// Suggest up to `limit` notable child paths for a module.
+/// Prioritizes structs/enums/traits over functions/constants.
+fn module_child_suggestions(
+    crate_name: &str,
+    path: &[String],
+    items: &[Id],
+    krate: &fetch::Crate,
+    limit: usize,
+) -> Vec<String> {
+    // Priority order for suggestions.
+    fn priority(inner: &ItemEnum) -> Option<u8> {
+        match inner {
+            ItemEnum::Struct(_) => Some(0),
+            ItemEnum::Enum(_) => Some(1),
+            ItemEnum::Trait(_) => Some(2),
+            ItemEnum::Function(_) => Some(3),
+            ItemEnum::Module(_) => Some(4),
+            ItemEnum::TypeAlias(_) => Some(5),
+            ItemEnum::Constant { .. } => Some(6),
+            _ => None,
+        }
+    }
+
+    let mut candidates: Vec<(u8, &str)> = items
+        .iter()
+        .filter_map(|id| krate.index.get(id))
+        .filter_map(|child| {
+            let name = match &child.inner {
+                ItemEnum::Use(use_data) => Some(use_data.name.as_str()),
+                _ => child.name.as_deref(),
+            };
+            let prio = match &child.inner {
+                // Re-exports: use the target's priority if resolvable.
+                ItemEnum::Use(use_data) => use_data
+                    .id
+                    .as_ref()
+                    .and_then(|id| krate.index.get(id))
+                    .and_then(|target| priority(&target.inner)),
+                other => priority(other),
+            };
+            match (name, prio) {
+                (Some(n), Some(p)) => Some((p, n)),
+                _ => None,
+            }
+        })
+        .collect();
+
+    candidates.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(b.1)));
+
+    let prefix = if path.is_empty() {
+        crate_name.to_string()
+    } else {
+        format!("{crate_name}::{}", path.join("::"))
+    };
+
+    candidates
+        .into_iter()
+        .take(limit)
+        .map(|(_, name)| format!("  wtr {prefix}::{name}"))
+        .collect()
+}
+
+// ── Search results rendering ────────────────────────────────────────────
+
+fn kind_label(kind: rustdoc_types::ItemKind) -> &'static str {
+    use rustdoc_types::ItemKind;
+    match kind {
+        ItemKind::Module => "mod",
+        ItemKind::Struct => "struct",
+        ItemKind::Enum => "enum",
+        ItemKind::Union => "union",
+        ItemKind::Trait => "trait",
+        ItemKind::Function => "fn",
+        ItemKind::TypeAlias => "type",
+        ItemKind::Constant => "const",
+        ItemKind::Static => "static",
+        ItemKind::Macro | ItemKind::ProcAttribute | ItemKind::ProcDerive => "macro",
+        _ => "item",
+    }
+}
+
+/// Render search results as a formatted listing.
+pub fn render_search_results(results: &[lookup::SearchResult], crate_name: &str) -> String {
+    if results.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    for result in results {
+        // Show path without the crate name prefix.
+        let display_path = if result.path.first().is_some_and(|first| first == crate_name) {
+            result.path[1..].join("::")
+        } else {
+            result.path.join("::")
+        };
+
+        out.push_str(&format!(
+            "  {}::{} ({})\n",
+            crate_name,
+            display_path,
+            kind_label(result.kind)
+        ));
+
+        if let Some(line) = first_doc_line(&result.item.docs) {
+            out.push_str(&format!("    {line}\n"));
+        }
+
+        out.push('\n');
+    }
+
     out
 }
 

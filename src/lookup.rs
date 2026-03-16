@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use rustdoc_types::{Id, Item, ItemEnum};
+use rustdoc_types::{Id, Item, ItemEnum, ItemKind};
 
 use crate::fetch::Crate;
 
@@ -212,6 +212,80 @@ pub fn find_methods<'a>(krate: &'a Crate, type_item: &Item) -> Vec<&'a Item> {
         }
     }
     methods
+}
+
+// ── Search ──────────────────────────────────────────────────────────────
+
+pub struct SearchResult<'a> {
+    pub item: &'a Item,
+    pub path: &'a [String],
+    pub kind: ItemKind,
+    /// True if the item name matches the search term exactly (case-insensitive).
+    pub exact: bool,
+}
+
+const MAX_SEARCH_RESULTS: usize = 20;
+
+/// Kinds to exclude from search results (internal details).
+fn is_excluded_kind(kind: ItemKind) -> bool {
+    matches!(
+        kind,
+        ItemKind::Impl | ItemKind::Variant | ItemKind::StructField
+    )
+}
+
+/// Search for items in a crate whose name matches the given term.
+///
+/// Uses case-insensitive substring matching, with exact matches flagged.
+/// Results are sorted with exact matches first, then alphabetically by path.
+pub fn search_items<'a>(krate: &'a Crate, term: &str) -> Vec<SearchResult<'a>> {
+    let term_lower = term.to_lowercase();
+    let mut results: Vec<SearchResult<'a>> = Vec::new();
+
+    for (id, summary) in &krate.paths {
+        // Only include items from this crate.
+        if summary.crate_id != 0 {
+            continue;
+        }
+        if is_excluded_kind(summary.kind) {
+            continue;
+        }
+
+        // Skip the crate root module (path is just the crate name).
+        if summary.path.len() <= 1 {
+            continue;
+        }
+
+        let Some(item_name) = summary.path.last() else {
+            continue;
+        };
+        let name_lower = item_name.to_lowercase();
+        if !name_lower.contains(&term_lower) {
+            continue;
+        }
+
+        let Some(item) = krate.index.get(id) else {
+            continue;
+        };
+
+        let exact = name_lower == term_lower;
+        results.push(SearchResult {
+            item,
+            path: &summary.path,
+            kind: summary.kind,
+            exact,
+        });
+    }
+
+    // Exact matches first, then alphabetically by path.
+    results.sort_by(|a, b| {
+        b.exact
+            .cmp(&a.exact)
+            .then_with(|| a.path.cmp(b.path))
+    });
+
+    results.truncate(MAX_SEARCH_RESULTS);
+    results
 }
 
 /// Collect trait implementations for a type.

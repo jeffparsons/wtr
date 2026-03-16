@@ -302,6 +302,7 @@ fn suggestions_for_struct() {
         "rangemap",
         &["RangeMap".into()],
         result.item,
+        &krate,
         false,
         false,
         false,
@@ -325,6 +326,7 @@ fn suggestions_omit_used_flags() {
         "rangemap",
         &["RangeMap".into()],
         result.item,
+        &krate,
         false,
         true,
         false,
@@ -341,6 +343,7 @@ fn suggestions_empty_when_all_used() {
         "rangemap",
         &["RangeMap".into()],
         result.item,
+        &krate,
         true,
         true,
         true,
@@ -357,6 +360,7 @@ fn no_suggestions_for_function() {
         "rangemap",
         &["RangeMap".into(), "insert".into()],
         result.item,
+        &krate,
         false,
         false,
         false,
@@ -372,4 +376,104 @@ fn no_suggestions_for_function() {
     );
     // But should still suggest --full.
     assert!(suggestions.contains("--full"), "suggestions: {suggestions}");
+}
+
+// ── Search ──────────────────────────────────────────────────────────────
+
+#[test]
+fn search_finds_exact_match() {
+    let krate = load_rangemap_v1_7_1();
+    let results = lookup::search_items(&krate, "RangeMap");
+    assert!(!results.is_empty(), "should find RangeMap");
+    let has_rangemap = results
+        .iter()
+        .any(|r| r.item.name.as_deref() == Some("RangeMap") && r.exact);
+    assert!(has_rangemap, "should have an exact match for RangeMap");
+}
+
+#[test]
+fn search_finds_substring_match() {
+    let krate = load_rangemap_v1_7_1();
+    let results = lookup::search_items(&krate, "range");
+    let names: Vec<_> = results
+        .iter()
+        .filter_map(|r| r.item.name.as_deref())
+        .collect();
+    assert!(
+        names.iter().any(|n| *n == "RangeMap"),
+        "should find RangeMap: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| *n == "RangeSet"),
+        "should find RangeSet: {names:?}"
+    );
+}
+
+#[test]
+fn search_is_case_insensitive() {
+    let krate = load_rangemap_v1_7_1();
+    let results = lookup::search_items(&krate, "rangemap");
+    let names: Vec<_> = results
+        .iter()
+        .filter_map(|r| r.item.name.as_deref())
+        .collect();
+    assert!(
+        names.contains(&"RangeMap"),
+        "case-insensitive search should find RangeMap: {names:?}"
+    );
+}
+
+#[test]
+fn search_no_results() {
+    let krate = load_rangemap_v1_7_1();
+    let results = lookup::search_items(&krate, "nonexistent");
+    assert!(results.is_empty(), "should find nothing: {results:?}", results = results.len());
+}
+
+// ── Module children ─────────────────────────────────────────────────────
+
+#[test]
+fn render_module_full_lists_children() {
+    let krate = load_rangemap_v1_7_1();
+    let result = lookup::lookup_item(&krate, &["map".into()]).unwrap();
+    let output = render::render_item_full(result.item, &krate);
+    assert!(
+        output.contains("Structs:"),
+        "should have Structs heading: {output}"
+    );
+    assert!(
+        output.contains("RangeMap"),
+        "should list RangeMap child: {output}"
+    );
+}
+
+#[test]
+fn render_crate_root_full_lists_children() {
+    let krate = load_rangemap_v1_7_1();
+    let result = lookup::lookup_item(&krate, &[]).unwrap();
+    let output = render::render_item_full(result.item, &krate);
+    // The root module should list top-level items.
+    assert!(
+        output.contains("RangeMap") || output.contains("Modules:"),
+        "root full output should list children: {output}"
+    );
+}
+
+#[test]
+fn suggestions_for_module_suggest_children() {
+    let krate = load_rangemap_v1_7_1();
+    let result = lookup::lookup_item(&krate, &["map".into()]).unwrap();
+    let suggestions = render::render_suggestions(
+        "rangemap",
+        &["map".into()],
+        result.item,
+        &krate,
+        true,
+        false,
+        false,
+    );
+    assert!(
+        suggestions.contains("wtr rangemap::map::"),
+        "should suggest child paths: {suggestions}"
+    );
 }
