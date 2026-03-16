@@ -128,7 +128,23 @@ async fn run(cli: Cli) -> Result<()> {
     let lookup::LookupResult {
         item,
         reexport_source,
-    } = lookup::lookup_item(krate, &path)?;
+    } = match lookup::lookup_item(krate, &path) {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("Error: {e:#}");
+            if let Some(last) = path.last() {
+                let results = lookup::search_items(krate, last);
+                if !results.is_empty() {
+                    let truncated: Vec<_> = results.into_iter().take(5).collect();
+                    eprintln!(
+                        "\nDid you mean?\n\n{}",
+                        render::render_search_results(&truncated, &crate_name)
+                    );
+                }
+            }
+            std::process::exit(1);
+        }
+    };
 
     let mut body = header;
 
