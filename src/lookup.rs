@@ -243,10 +243,6 @@ pub fn search_items<'a>(krate: &'a Crate, term: &str) -> Vec<SearchResult<'a>> {
     let mut results: Vec<SearchResult<'a>> = Vec::new();
 
     for (id, summary) in &krate.paths {
-        // Only include items from this crate.
-        if summary.crate_id != 0 {
-            continue;
-        }
         if is_excluded_kind(summary.kind) {
             continue;
         }
