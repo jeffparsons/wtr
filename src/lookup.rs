@@ -214,6 +214,70 @@ pub fn find_methods<'a>(krate: &'a Crate, type_item: &Item) -> Vec<&'a Item> {
     methods
 }
 
+// ── External items (cross-crate re-exports) ─────────────────────────────
+
+/// An item found in `krate.paths` but not in `krate.index`, indicating
+/// it's defined in an external crate and only re-exported here.
+pub struct ExternalItem {
+    /// The source crate name (first element of the path).
+    pub crate_name: String,
+    /// The item path within the source crate (everything after crate name).
+    pub path: Vec<String>,
+    pub kind: ItemKind,
+}
+
+/// Check if a path matches an item in `paths` that isn't in `index` (external).
+pub fn find_external_item(krate: &Crate, query: &[String]) -> Option<ExternalItem> {
+    for (id, summary) in &krate.paths {
+        if summary.path.len() > query.len() {
+            let tail = &summary.path[summary.path.len() - query.len()..];
+            if tail == query && !krate.index.contains_key(id) && summary.path.len() >= 2 {
+                return Some(ExternalItem {
+                    crate_name: summary.path[0].clone(),
+                    path: summary.path[1..].to_vec(),
+                    kind: summary.kind,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// Search for external items matching a term (for search mode fallback).
+pub fn search_external_items(krate: &Crate, term: &str) -> Vec<ExternalItem> {
+    let term_lower = term.to_lowercase();
+    let mut results = Vec::new();
+
+    for (id, summary) in &krate.paths {
+        if is_excluded_kind(summary.kind) {
+            continue;
+        }
+        if summary.path.len() <= 1 {
+            continue;
+        }
+        let Some(item_name) = summary.path.last() else {
+            continue;
+        };
+        let name_lower = item_name.to_lowercase();
+        if !name_lower.contains(&term_lower) {
+            continue;
+        }
+        // Only include items not in the index (truly external).
+        if krate.index.contains_key(id) {
+            continue;
+        }
+        if summary.path.len() >= 2 {
+            results.push(ExternalItem {
+                crate_name: summary.path[0].clone(),
+                path: summary.path[1..].to_vec(),
+                kind: summary.kind,
+            });
+        }
+    }
+
+    results
+}
+
 // ── Search ──────────────────────────────────────────────────────────────
 
 pub struct SearchResult<'a> {
